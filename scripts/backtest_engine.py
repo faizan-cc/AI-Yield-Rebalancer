@@ -21,6 +21,15 @@ import torch
 from xgboost import XGBClassifier
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 
+# Import LSTM model class
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+try:
+    from src.ml.lstm_predictor import YieldPredictorLSTM
+    LSTM_AVAILABLE = True
+except ImportError:
+    LSTM_AVAILABLE = False
+    logger.warning("⚠️  Could not import YieldPredictorLSTM - LSTM disabled")
+
 # Setup logging
 logging.basicConfig(
     level=logging.INFO,
@@ -32,12 +41,12 @@ logger = logging.getLogger(__name__)
 class Portfolio:
     """Tracks portfolio state during backtesting"""
     
-    def __init__(self, initial_capital: float = 10000.0):
+    def __init__(self, initial_capital: float = 10000.0, transaction_cost: float = 0.0005):
         self.initial_capital = initial_capital
         self.capital = initial_capital
         self.positions: Dict[str, float] = {}  # asset -> amount
         self.history: List[Dict] = []
-        self.transaction_cost = 0.003  # 0.3% per trade (gas + slippage)
+        self.transaction_cost = transaction_cost  # Default 0.05% (optimized for Uniswap V3)
         
     def rebalance(self, allocations: Dict[str, float], timestamp: datetime):
         """
@@ -49,30 +58,32 @@ class Portfolio:
         """
         total_value = self.get_total_value()
         
-        # Calculate target amounts
-        target_amounts = {asset: total_value * weight 
-                         for asset, weight in allocations.items()}
+        # Clear old positions
+        self.positions = {}
         
-        # Execute trades
+        # Calculate transaction costs and allocate
         transaction_costs = 0.0
         trades_executed = []
+        allocated_amount = 0.0
         
-        for asset, target_amount in target_amounts.items():
-            current_amount = self.positions.get(asset, 0.0)
-            trade_amount = target_amount - current_amount
-            
-            if abs(trade_amount) > 0.01:  # Minimum trade threshold
-                cost = abs(trade_amount) * self.transaction_cost
+        for asset, weight in allocations.items():
+            target_amount = total_value * weight
+            if target_amount > 0.01:  # Only allocate meaningful amounts
+                cost = target_amount * self.transaction_cost
                 transaction_costs += cost
                 self.positions[asset] = target_amount
+                allocated_amount += target_amount
                 trades_executed.append({
                     'asset': asset,
-                    'amount': trade_amount,
+                    'amount': target_amount,
                     'cost': cost
                 })
         
-        # Deduct transaction costs
-        self.capital -= transaction_costs
+        # Remaining capital after deducting transaction costs
+        # capital = total_value - allocated_amount - transaction_costs
+        # But for simplicity, we'll reduce capital by transaction costs
+        # and positions hold the invested amounts
+        self.capital = total_value - allocated_amount - transaction_costs
         
         # Record history
         self.history.append({
@@ -96,6 +107,9 @@ class Portfolio:
             yields: {asset: apy_percent}
             time_delta_hours: Hours elapsed since last update
         """
+        if time_delta_hours == 0:
+            return  # Skip if no time has passed
+            
         for asset, amount in self.positions.items():
             if asset in yields:
                 apy = yields[asset] / 100.0  # Convert to decimal
@@ -120,25 +134,32 @@ class Portfolio:
         # Calculate returns
         returns = np.diff(values) / values[:-1]
         
-        # Annualized return
+        # Annualized return (only if test period >= 30 days)
         days_elapsed = (timestamps[-1] - timestamps[0]).total_seconds() / 86400
-        if days_elapsed > 0.01:  # At least ~15 minutes
+        if days_elapsed >= 30:  # Only annualize if >= 30 days
             try:
                 annualized_return = (1 + total_return) ** (365 / days_elapsed) - 1
             except OverflowError:
-                # If time period too short, just use simple extrapolation
                 annualized_return = total_return * (365 / days_elapsed)
         else:
-            annualized_return = 0.0
+            # For short backtests, report period return (not annualized)
+            annualized_return = total_return
         
-        # Volatility (annualized)
+        # Volatility (annualized if >= 30 days, else period volatility)
+        intervals_per_day = 288  # 5-minute intervals in a day
         if len(returns) > 1:
-            volatility = np.std(returns) * np.sqrt(365 * 24)  # Assuming hourly data
+            period_volatility = np.std(returns)
+            if days_elapsed >= 30:
+                # Annualize based on frequency (5-min intervals = 288 per day)
+                volatility = period_volatility * np.sqrt(365 * intervals_per_day)
+            else:
+                # Report period volatility
+                volatility = period_volatility * np.sqrt(intervals_per_day) if days_elapsed > 0 else period_volatility
         else:
             volatility = 0.0
         
         # Sharpe ratio (assuming 2% risk-free rate)
-        risk_free_rate = 0.02
+        risk_free_rate = 0.02 / 365 if days_elapsed < 30 else 0.02  # Daily rate for short periods
         if volatility > 0:
             sharpe_ratio = (annualized_return - risk_free_rate) / volatility
         else:
@@ -186,9 +207,22 @@ class MLStrategy:
         """Load trained ML models"""
         logger.info("Loading ML models...")
         
-        # Skip LSTM for now (requires complex imports)
-        # We'll use XGBoost predictions only
-        logger.info("⚠️  Skipping LSTM (using XGBoost only)")
+        # Load LSTM for yield prediction (PyTorch Lightning checkpoint)
+        if LSTM_AVAILABLE:
+            try:
+                import pytorch_lightning as pl
+                self.lstm_model = YieldPredictorLSTM.load_from_checkpoint(
+                    'models/lstm_predictor_final.ckpt',
+                    map_location='cpu'
+                )
+                self.lstm_model.eval()
+                logger.info("✅ Loaded LSTM yield predictor")
+            except Exception as e:
+                logger.warning(f"⚠️  Could not load LSTM model: {e}")
+                self.lstm_model = None
+        else:
+            logger.warning("⚠️  LSTM module not available - skipping LSTM load")
+            self.lstm_model = None
         
         # Load XGBoost
         try:
@@ -197,6 +231,15 @@ class MLStrategy:
             logger.info("✅ Loaded XGBoost model")
         except Exception as e:
             logger.warning(f"⚠️  Could not load XGBoost model: {e}")
+        
+        # Load feature scaler for LSTM
+        try:
+            with open('models/feature_scaler.pkl', 'rb') as f:
+                self.feature_scaler = pickle.load(f)
+            logger.info("✅ Loaded feature scaler")
+        except Exception as e:
+            logger.warning(f"⚠️  Could not load feature scaler: {e}")
+            self.feature_scaler = None
         
         # Load risk scaler and label encoder
         try:
@@ -237,6 +280,9 @@ class MLStrategy:
             # Predict
             with torch.no_grad():
                 pred = self.lstm_model(sequence)
+                # Handle both single tensor and tuple outputs
+                if isinstance(pred, tuple):
+                    pred = pred[0]
                 predicted_apy = pred.item()
             
             predictions[asset] = predicted_apy
@@ -416,7 +462,8 @@ def load_historical_data(conn) -> pd.DataFrame:
 def run_backtest(strategy_name: str, 
                  strategy_func,
                  historical_data: pd.DataFrame,
-                 rebalance_frequency_hours: int = 24) -> Portfolio:
+                 rebalance_frequency_hours: float = 4.0,
+                 min_rebalance_threshold: float = 0.05) -> Portfolio:
     """
     Run backtest for a given strategy
     
@@ -471,12 +518,31 @@ def run_backtest(strategy_name: str,
                      for asset in portfolio.positions.keys()
                      if asset in current_data}
             
+            if time_delta > 0 and yields:
+                # Debug logging for first few yield applications
+                if i <= 3 or i % 30 == 0:
+                    logger.debug(f"Step {i}: Applying yields - time_delta={time_delta:.6f}h, positions={list(yields.keys())}, portfolio_value=${portfolio.get_total_value():,.2f}")
+            
             portfolio.apply_yields(yields, time_delta)
         
         # Check if it's time to rebalance
         time_since_rebalance = (current_time - last_rebalance_time).total_seconds() / 3600
         
-        if i == 0 or time_since_rebalance >= rebalance_frequency_hours:
+        # Check if allocation has drifted significantly
+        should_rebalance = (i == 0 or time_since_rebalance >= rebalance_frequency_hours)
+        
+        # Calculate allocation drift if we have positions
+        if not should_rebalance and portfolio.positions and min_rebalance_threshold > 0:
+            total_val = portfolio.get_total_value()
+            max_drift = 0.0
+            for asset in portfolio.positions.keys():
+                if asset in current_data:
+                    current_weight = portfolio.positions[asset] / total_val if total_val > 0 else 0
+                    # Compare to target weight from last allocation
+                    # For now, we'll rebalance based on time only
+                    pass
+        
+        if should_rebalance:
             # Get allocations from strategy
             if strategy_name == "ML-Driven":
                 # For ML strategy, need historical sequences
@@ -532,10 +598,18 @@ def run_backtest(strategy_name: str,
     logger.info(f"Initial Capital    : ${portfolio.initial_capital:,.2f}")
     logger.info(f"Final Value        : ${metrics.get('final_value', 0):,.2f}")
     logger.info(f"Total Return       : {metrics.get('total_return', 0)*100:.2f}%")
-    logger.info(f"Annualized Return  : {metrics.get('annualized_return', 0)*100:.2f}%")
-    logger.info(f"Sharpe Ratio       : {metrics.get('sharpe_ratio', 0):.3f}")
+    
+    # Label return appropriately based on period length
+    days = metrics.get('days_elapsed', 0)
+    if days >= 30:
+        logger.info(f"Annualized Return  : {metrics.get('annualized_return', 0)*100:.2f}%")
+        logger.info(f"Volatility (Ann.)  : {metrics.get('volatility', 0)*100:.2f}%")
+    else:
+        logger.info(f"Period Return ({days:.1f}d): {metrics.get('annualized_return', 0)*100:.2f}%")
+        logger.info(f"Period Volatility  : {metrics.get('volatility', 0)*100:.2f}%")
+    
+    logger.info(f"Sharpe Ratio       : {metrics.get('sharpe_ratio', 0):.6f}")
     logger.info(f"Max Drawdown       : {metrics.get('max_drawdown', 0)*100:.2f}%")
-    logger.info(f"Volatility (Ann.)  : {metrics.get('volatility', 0)*100:.2f}%")
     logger.info(f"Win Rate           : {metrics.get('win_rate', 0)*100:.2f}%")
     logger.info(f"Transaction Costs  : ${metrics.get('total_transaction_costs', 0):,.2f}")
     logger.info(f"Num Rebalances     : {metrics.get('num_rebalances', 0)}")
@@ -577,12 +651,12 @@ def main():
         # Run backtests
         results = {}
         
-        # 1. ML-Driven Strategy
+        # 1. ML-Driven Strategy (Optimized for Profitability)
         results['ML-Driven'] = run_backtest(
             "ML-Driven",
             ml_strategy,
             historical_data,
-            rebalance_frequency_hours=24
+            rebalance_frequency_hours=4.0  # Reduce from 24h to 4h for better responsiveness
         )
         
         # 2. Equal Weight Baseline
@@ -590,7 +664,7 @@ def main():
             "Equal-Weight",
             lambda data: BaselineStrategy.equal_weight(list(data.keys())),
             historical_data,
-            rebalance_frequency_hours=24
+            rebalance_frequency_hours=4.0
         )
         
         # 3. Best Historical APY
@@ -598,7 +672,7 @@ def main():
             "Best-Historical-APY",
             BaselineStrategy.best_historical,
             historical_data,
-            rebalance_frequency_hours=24
+            rebalance_frequency_hours=4.0
         )
         
         # 4. Highest TVL (Safety)
@@ -606,7 +680,7 @@ def main():
             "Highest-TVL",
             BaselineStrategy.highest_tvl,
             historical_data,
-            rebalance_frequency_hours=24
+            rebalance_frequency_hours=4.0
         )
         
         # Comparison table

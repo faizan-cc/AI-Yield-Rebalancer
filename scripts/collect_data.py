@@ -112,13 +112,14 @@ async def collect_and_store_current_data():
             for market in aave_data["markets"]:
                 asset = market.get("symbol", market.get("asset", "UNKNOWN"))
                 apy = market.get("supply_apy", market.get("apy_percent", 0))
+                tvl = market.get("total_liquidity_usd", 0)
                 
                 insert_protocol_yields(
                     db_conn, protocol_id, asset, apy,
-                    liquidity=0, utilization=0
+                    liquidity=tvl, utilization=0
                 )
             
-            logger.info(f"✅ Stored {len(aave_data['markets'])} Aave markets")
+            logger.info(f"✅ Stored {len(aave_data['markets'])} Aave markets with TVL data")
     except Exception as e:
         logger.error(f"❌ Aave collection failed: {e}")
     
@@ -169,13 +170,14 @@ async def collect_and_store_current_data():
             for pool in curve_data["pools"]:
                 asset = pool.get("pool_name", pool.get("asset", "UNKNOWN"))
                 apy = pool.get("base_yield", pool.get("apy_percent", 0))
+                tvl = pool.get("total_liquidity_usd", 0)
                 
                 insert_protocol_yields(
                     db_conn, protocol_id, asset, apy,
-                    liquidity=0, utilization=0
+                    liquidity=tvl, utilization=0
                 )
             
-            logger.info(f"✅ Stored {len(curve_data['pools'])} Curve pools")
+            logger.info(f"✅ Stored {len(curve_data['pools'])} Curve pools with TVL data")
     except Exception as e:
         logger.error(f"❌ Curve collection failed: {e}")
     
