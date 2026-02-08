@@ -144,18 +144,31 @@ async def collect_and_store_current_data():
                 asset = f"{token0}/{token1}"
                 
                 tvl = float(pool.get("totalValueLockedUSD", 0))
-                volume = float(pool.get("volumeUSD", 0))
                 
-                # Estimate APY from fees (simplified)
-                fees = float(pool.get("feesUSD", 0))
-                apy = (fees / tvl * 365) if tvl > 0 else 0
+                # Get 24h fee data for accurate APY calculation
+                pool_id = pool.get("id")
+                try:
+                    day_data = await aggregator.graph_client.get_uniswap_pool_day_data(pool_id)
+                    if day_data and "poolDayDatas" in day_data and len(day_data["poolDayDatas"]) > 0:
+                        fees_24h = float(day_data["poolDayDatas"][0].get("feesUSD", 0))
+                        # Calculate APY: (daily fees / TVL) * 365 * 100
+                        apy = (fees_24h / tvl * 365 * 100) if tvl > 0 else 0
+                    else:
+                        # Fallback: estimate from fee tier (0.05%, 0.3%, 1%)
+                        fee_tier = int(pool.get("feeTier", 3000))
+                        apy = fee_tier / 10000  # Convert basis points to percentage
+                except Exception as e:
+                    logger.warning(f"Could not get day data for {asset}: {e}")
+                    # Fallback to fee tier
+                    fee_tier = int(pool.get("feeTier", 3000))
+                    apy = fee_tier / 10000
                 
                 insert_protocol_yields(
                     db_conn, protocol_id, asset, apy,
                     liquidity=tvl, utilization=0
                 )
             
-            logger.info(f"✅ Stored {len(pools)} Uniswap pools")
+            logger.info(f"✅ Stored {len(pools)} Uniswap pools with 24h fee data")
     except Exception as e:
         logger.error(f"❌ Uniswap collection failed: {e}")
     

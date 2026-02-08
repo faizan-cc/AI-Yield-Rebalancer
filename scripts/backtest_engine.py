@@ -41,12 +41,14 @@ logger = logging.getLogger(__name__)
 class Portfolio:
     """Tracks portfolio state during backtesting"""
     
-    def __init__(self, initial_capital: float = 10000.0, transaction_cost: float = 0.0005):
+    def __init__(self, initial_capital: float = 10000.0, transaction_cost: float = 0.0005, min_trade_size: float = 100.0):
         self.initial_capital = initial_capital
         self.capital = initial_capital
         self.positions: Dict[str, float] = {}  # asset -> amount
         self.history: List[Dict] = []
         self.transaction_cost = transaction_cost  # Default 0.05% (optimized for Uniswap V3)
+        self.min_trade_size = min_trade_size  # Minimum $100 per trade to reduce small trades
+        self.last_allocations: Dict[str, float] = {}  # Track last allocations for drift calculation
         
     def rebalance(self, allocations: Dict[str, float], timestamp: datetime):
         """
@@ -68,7 +70,7 @@ class Portfolio:
         
         for asset, weight in allocations.items():
             target_amount = total_value * weight
-            if target_amount > 0.01:  # Only allocate meaningful amounts
+            if target_amount >= self.min_trade_size:  # Only allocate amounts >= min_trade_size
                 cost = target_amount * self.transaction_cost
                 transaction_costs += cost
                 self.positions[asset] = target_amount
@@ -332,14 +334,16 @@ class MLStrategy:
     def calculate_allocations(self, 
                             yield_predictions: Dict[str, float],
                             risk_classifications: Dict[str, str],
-                            current_data: Dict[str, Dict]) -> Dict[str, float]:
+                            current_data: Dict[str, Dict],
+                            min_apy_threshold: float = 50.0) -> Dict[str, float]:
         """
         Calculate optimal portfolio allocations
         
         Strategy:
         1. Filter out high-risk assets
-        2. Score assets by current APY / risk
-        3. Allocate proportionally to scores
+        2. Filter assets below minimum APY threshold (50%)
+        3. Score assets by current APY / risk
+        4. Allocate proportionally to scores
         
         Returns:
             {asset: weight} where weights sum to 1.0
@@ -364,6 +368,10 @@ class MLStrategy:
                 continue
             
             current_apy = current_data[asset]['apy']
+            
+            # Filter out low-yield assets (< 50% APY)
+            if current_apy < min_apy_threshold:
+                continue
             
             # Score = current_apy * risk_weight
             score = max(0, current_apy) * risk_weight
@@ -462,7 +470,7 @@ def load_historical_data(conn) -> pd.DataFrame:
 def run_backtest(strategy_name: str, 
                  strategy_func,
                  historical_data: pd.DataFrame,
-                 rebalance_frequency_hours: float = 4.0,
+                 rebalance_frequency_hours: float = 8.0,
                  min_rebalance_threshold: float = 0.05) -> Portfolio:
     """
     Run backtest for a given strategy
@@ -471,7 +479,8 @@ def run_backtest(strategy_name: str,
         strategy_name: Name of strategy
         strategy_func: Function that returns allocations
         historical_data: DataFrame with all historical data
-        rebalance_frequency_hours: How often to rebalance
+        rebalance_frequency_hours: How often to rebalance (default 8h for profitability)
+        min_rebalance_threshold: Minimum portfolio drift to trigger rebalance (default 5%)
         
     Returns:
         Portfolio with complete history
@@ -528,19 +537,24 @@ def run_backtest(strategy_name: str,
         # Check if it's time to rebalance
         time_since_rebalance = (current_time - last_rebalance_time).total_seconds() / 3600
         
-        # Check if allocation has drifted significantly
+        # Calculate allocation drift if we have positions
         should_rebalance = (i == 0 or time_since_rebalance >= rebalance_frequency_hours)
         
-        # Calculate allocation drift if we have positions
-        if not should_rebalance and portfolio.positions and min_rebalance_threshold > 0:
+        if not should_rebalance and portfolio.positions and portfolio.last_allocations and min_rebalance_threshold > 0:
             total_val = portfolio.get_total_value()
             max_drift = 0.0
-            for asset in portfolio.positions.keys():
-                if asset in current_data:
-                    current_weight = portfolio.positions[asset] / total_val if total_val > 0 else 0
-                    # Compare to target weight from last allocation
-                    # For now, we'll rebalance based on time only
-                    pass
+            
+            # Calculate drift from target allocations
+            for asset in portfolio.last_allocations.keys():
+                target_weight = portfolio.last_allocations[asset]
+                current_weight = portfolio.positions.get(asset, 0) / total_val if total_val > 0 else 0
+                drift = abs(current_weight - target_weight)
+                max_drift = max(max_drift, drift)
+            
+            # Trigger rebalance if drift exceeds threshold
+            if max_drift >= min_rebalance_threshold:
+                should_rebalance = True
+                logger.info(f"Step {i}: Drift threshold triggered ({max_drift:.2%} > {min_rebalance_threshold:.2%})")
         
         if should_rebalance:
             # Get allocations from strategy

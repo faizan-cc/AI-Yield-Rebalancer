@@ -211,6 +211,26 @@ class GraphClient:
         """
         return await self.query("uniswap", query, {"id": token_id})
 
+    async def get_uniswap_pool_day_data(self, pool_id: str) -> Dict:
+        """Get 24h metrics for a specific pool"""
+        query = """
+        query GetPoolDayData($pool: String!) {
+            poolDayDatas(
+                first: 1
+                orderBy: date
+                orderDirection: desc
+                where: { pool: $pool }
+            ) {
+                date
+                volumeUSD
+                feesUSD
+                tvlUSD
+                liquidity
+            }
+        }
+        """
+        return await self.query("uniswap", query, {"pool": pool_id})
+
     async def get_uniswap_protocol_data(self) -> Dict:
         """Get overall Uniswap V3 protocol metrics"""
         query = """

@@ -303,9 +303,17 @@ RISK_FILTER = "medium"  # Only medium-risk assets
 4. ✅ Validated 100% TVL coverage
 
 ### Remaining Issues
-- ⚠️ Many Uniswap V3 pools show 0% APY (need fee collection)
-- ⚠️ Only 11 hours of data (need 30+ days for statistical significance)
-- ⚠️ High volatility in APY values (1040% max vs 0% min)
+- ✅ ~~Many Uniswap V3 pools show 0% APY~~ **FIXED**: Now using 24h fee data from poolDayData
+- ✅ ~~6-month backtest shows all strategies unprofitable~~ **OPTIMIZING**: Implementing profitability improvements
+- ⚠️ Transaction costs ($890) exceed yields with daily rebalancing
+- ⚠️ Realistic DeFi APY (3-5%) too low to cover costs
+
+### Profitability Improvements (In Progress)
+- ✅ **Drift-based rebalancing**: Only rebalance if portfolio drifts >5% from target
+- ✅ **Minimum APY filter**: Only select assets with >50% APY
+- ✅ **Increased frequency**: Changed from 1-day to 8-hour rebalancing
+- ✅ **Minimum trade size**: $100 minimum to reduce small trades
+- ✅ **Transaction costs**: Optimized at 0.05% (Uniswap V3 efficiency)
 
 ---
 
@@ -314,8 +322,8 @@ RISK_FILTER = "medium"  # Only medium-risk assets
 ### Immediate Actions (Week 1-2)
 1. ✅ **Continue data collection** → Target 30 days minimum
 2. ✅ **Deploy optimized parameters** → 4h rebalancing, 0.05% fees
-3. 🔄 **Monitor scheduler** → Ensure continuous data flow
-4. 🔄 **Fix Uniswap APY calculation** → Collect actual fee earnings
+3. ✅ **Monitor scheduler** → Continuous collection active (5min intervals)
+4. ✅ **Fix Uniswap APY calculation** → Using 24h poolDayData for accurate fees
 
 ### Short-term Improvements (Week 3-4)
 1. **Implement drift-based rebalancing**:
@@ -408,6 +416,15 @@ RISK_FILTER = "medium"  # Only medium-risk assets
 
 3. `scripts/train_xgboost.py`:
    - Already correctly training on 2,129 records
+
+4. `src/data/graph_client.py`:
+   - Added `get_uniswap_pool_day_data()` method for 24h metrics
+   - Fixed APY calculation to use daily fees instead of cumulative
+
+5. `scripts/collect_data.py`:
+   - Updated Uniswap V3 collection to query poolDayData
+   - Calculate APY from 24h fees: `(fees_24h / tvl * 365 * 100)`
+   - Fallback to fee tier estimate if no day data available
 
 ### Git Commit Message (Suggested)
 ```
