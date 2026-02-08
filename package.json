@@ -1,0 +1,65 @@
+{
+  "name": "defi-yield-rebalancer",
+  "version": "1.0.0",
+  "description": "AI-Driven Yield Rebalancing System for DeFi",
+  "author": "Yield Optimization Research Team",
+  "license": "MIT",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/defi-yield-rebalancer.git"
+  },
+  "keywords": [
+    "defi",
+    "yield-farming",
+    "ai",
+    "machine-learning",
+    "reinforcement-learning",
+    "smart-contracts",
+    "ethereum",
+    "aave",
+    "curve",
+    "uniswap"
+  ],
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
+  "scripts": {
+    "contracts:build": "cd contracts && forge build",
+    "contracts:test": "cd contracts && forge test -vvv",
+    "contracts:coverage": "cd contracts && forge coverage",
+    "contracts:deploy:testnet": "cd contracts && forge script script/Deploy.s.sol --rpc-url $RPC_URL --broadcast",
+    "contracts:verify": "cd contracts && forge verify-contract",
+    "contracts:gas-report": "cd contracts && forge test --gas-report",
+    "subgraph:codegen": "graph codegen",
+    "subgraph:build": "graph build",
+    "subgraph:deploy": "graph deploy --node https://api.thegraph.com/deploy/",
+    "lint": "prettier --check '**/*.{js,ts,json,md}'",
+    "format": "prettier --write '**/*.{js,ts,json,md}'",
+    "docs:build": "mkdocs build",
+    "docs:serve": "mkdocs serve"
+  },
+  "devDependencies": {
+    "@graphprotocol/graph-cli": "^0.64.0",
+    "@graphprotocol/graph-ts": "^0.31.0",
+    "prettier": "^3.1.1",
+    "prettier-plugin-solidity": "^1.3.1",
+    "husky": "^8.0.3",
+    "lint-staged": "^15.2.0"
+  },
+  "dependencies": {},
+  "husky": {
+    "hooks": {
+      "pre-commit": "lint-staged"
+    }
+  },
+  "lint-staged": {
+    "*.{js,ts,json,md}": [
+      "prettier --write"
+    ],
+    "*.sol": [
+      "prettier --write --plugin=prettier-plugin-solidity"
+    ]
+  }
+}

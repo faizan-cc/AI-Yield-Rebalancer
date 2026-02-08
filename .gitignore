@@ -1,0 +1,254 @@
+# AI-Driven DeFi Yield Rebalancing System
+# Git Ignore
+
+# ============================================================================
+# Python
+# ============================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# PyCharm
+.idea/
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# Spyder
+.spyderproject
+.spyproject
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre
+.pyre/
+
+# ============================================================================
+# Machine Learning
+# ============================================================================
+# Trained models (large files)
+models/*.pth
+models/*.pt
+models/*.h5
+models/*.pkl
+models/*.joblib
+models/*.onnx
+models/*.zip
+
+# Keep directory structure
+!models/.gitkeep
+
+# TensorBoard logs
+logs/
+runs/
+tensorboard/
+
+# Datasets (large files)
+data/raw/
+data/processed/
+data/cache/
+*.csv
+*.parquet
+*.feather
+*.hdf5
+
+# Keep directory structure
+!data/.gitkeep
+
+# Optuna database
+*.db
+
+# ============================================================================
+# Blockchain & Smart Contracts
+# ============================================================================
+# Foundry
+contracts/cache/
+contracts/out/
+contracts/broadcast/
+contracts/deployments/
+
+# Hardhat (if used)
+node_modules/
+artifacts/
+cache/
+typechain/
+typechain-types/
+
+# Private keys (CRITICAL - NEVER COMMIT)
+*.key
+*.pem
+*.p12
+*.pfx
+keystore/
+secrets/
+
+# ============================================================================
+# Environment Variables
+# ============================================================================
+.env
+.env.local
+.env.*.local
+.env.production
+.env.development
+
+# Keep example file
+!.env.example
+
+# ============================================================================
+# Database
+# ============================================================================
+*.db
+*.sqlite
+*.sqlite3
+postgres-data/
+
+# ============================================================================
+# Logs
+# ============================================================================
+*.log
+logs/
+*.out
+
+# ============================================================================
+# OS Files
+# ============================================================================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# ============================================================================
+# Temporary Files
+# ============================================================================
+tmp/
+temp/
+*.tmp
+*.bak
+*.swp
+*.swo
+*~
+
+# ============================================================================
+# Docker
+# ============================================================================
+*.pid
+docker-compose.override.yml
+
+# ============================================================================
+# Monitoring
+# ============================================================================
+prometheus_data/
+grafana_data/
+
+# ============================================================================
+# Backtest Results
+# ============================================================================
+backtest_results/
+simulation_outputs/
+
+# ============================================================================
+# Documentation Build
+# ============================================================================
+docs/_build/
+site/
+
+# ============================================================================
+# Package Managers
+# ============================================================================
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# ============================================================================
+# Project-Specific
+# ============================================================================
+# Private research notes
+PRIVATE_NOTES.md
+TODO_PRIVATE.md
+
+# API keys and credentials (backup check)
+**/credentials.json
+**/config/production.yaml
+**/config/mainnet.yaml
+
+# Large binary files
+*.bin
+*.dat
+*.gz
+*.tar
+*.zip
+*.rar
+
+# Backup files
+backup/
+*.backup
