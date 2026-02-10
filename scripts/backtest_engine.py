@@ -24,11 +24,11 @@ from sklearn.preprocessing import StandardScaler, LabelEncoder
 # Import LSTM model class
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 try:
-    from src.ml.lstm_predictor import YieldPredictorLSTM
+    from src.ml.yield_predictor import YieldForecaster
     LSTM_AVAILABLE = True
 except ImportError:
     LSTM_AVAILABLE = False
-    logger.warning("⚠️  Could not import YieldPredictorLSTM - LSTM disabled")
+    print("⚠️  Could not import YieldForecaster - LSTM disabled")
 
 # Setup logging
 logging.basicConfig(

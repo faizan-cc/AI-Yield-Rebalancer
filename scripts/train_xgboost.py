@@ -97,19 +97,23 @@ def prepare_risk_data(db_url: str):
     db_conn = psycopg2.connect(db_url)
     cursor = db_conn.cursor()
     
-    # Get latest yield data for each asset
+    # Get latest yield data for each asset from NEW schema
     cursor.execute("""
         WITH latest_records AS (
-            SELECT asset, 
-                   apy_percent,
-                   COALESCE(tvl_usd, 0) as tvl,
-                   COALESCE(utilization_ratio, 0) as utilization,
-                   recorded_at,
-                   ROW_NUMBER() OVER (PARTITION BY asset ORDER BY recorded_at DESC) as rn
-            FROM protocol_yields
-            WHERE apy_percent <= 200  -- Exclude extreme outliers
+            SELECT 
+                a.symbol as asset,
+                a.protocol,
+                ym.apy_percent,
+                COALESCE(ym.tvl_usd, 0) as tvl,
+                COALESCE(ym.utilization_rate, 0) as utilization,
+                COALESCE(ym.volatility_24h, 0) as volatility,
+                ym.time,
+                ROW_NUMBER() OVER (PARTITION BY ym.asset_id ORDER BY ym.time DESC) as rn
+            FROM yield_metrics ym
+            JOIN assets a ON ym.asset_id = a.id
+            WHERE ym.apy_percent <= 200  -- Exclude extreme outliers
         )
-        SELECT asset, apy_percent, tvl, utilization
+        SELECT asset, protocol, apy_percent, tvl, utilization, volatility
         FROM latest_records
         WHERE rn = 1
     """)
@@ -119,21 +123,25 @@ def prepare_risk_data(db_url: str):
     
     logger.info(f"Fetched {len(records)} unique assets")
     
-    if len(records) < 10:
-        raise ValueError(f"Need at least 10 assets, have {len(records)}")
+    if len(records) < 5:
+        raise ValueError(f"Need at least 5 assets, have {len(records)}")
     
     # Create features and labels
     X = []
     y = []
     assets = []
+    protocols = []
     
-    for asset, apy, tvl, util in records:
-        # Simple 4-feature model for risk classification
+    for asset, protocol, apy, tvl, util, volatility in records:
+        # Enhanced feature set for risk classification
         features = [
             apy,
             tvl,
             util,
-            apy / (tvl + 1)  # Yield/TVL ratio (risk indicator)
+            volatility,
+            apy / (tvl + 1),  # Yield/TVL ratio (risk indicator)
+            1 if protocol == 'uniswap_v3' else 0,  # DEX flag
+            1 if protocol == 'aave_v3' else 0,     # Lending flag
         ]
         
         risk_label = calculate_risk_label(apy, tvl, util)
@@ -141,15 +149,21 @@ def prepare_risk_data(db_url: str):
         X.append(features)
         y.append(risk_label)
         assets.append(asset)
+        protocols.append(protocol)
     
     X = np.array(X)
     y = np.array(y)
     
-    logger.info(f"Created {len(X)} samples with 4 features")
+    logger.info(f"Created {len(X)} samples with 7 features")
     logger.info(f"\nRisk distribution:")
     unique, counts = np.unique(y, return_counts=True)
     for label, count in zip(unique, counts):
         logger.info(f"  {label}: {count} samples ({count/len(y)*100:.1f}%)")
+    
+    logger.info(f"\nProtocol distribution:")
+    unique_protocols, protocol_counts = np.unique(protocols, return_counts=True)
+    for protocol, count in zip(unique_protocols, protocol_counts):
+        logger.info(f"  {protocol}: {count} samples")
     
     # Normalize features
     scaler = StandardScaler()
@@ -249,7 +263,7 @@ def train_risk_classifier(X, y, y_labels):
     logger.info("FEATURE IMPORTANCE")
     logger.info(f"{'='*80}\n")
     
-    feature_names = ['APY', 'TVL', 'Utilization', 'Yield/TVL Ratio']
+    feature_names = ['APY', 'TVL', 'Utilization', 'Volatility', 'Yield/TVL Ratio', 'Is_DEX', 'Is_Lending']
     importances = model.feature_importances_
     for name, importance in sorted(zip(feature_names, importances), key=lambda x: x[1], reverse=True):
         logger.info(f"  {name:20s}: {importance:.3f}")
