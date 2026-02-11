@@ -139,13 +139,14 @@ class DefiLlamaBackfiller:
             print(f"Exception searching for pool: {str(e)}")
             return None
     
-    def get_asset_id(self, symbol: str, protocol: str) -> Optional[int]:
+    def get_asset_id(self, symbol: str, protocol: str, chain: str = 'ethereum') -> Optional[int]:
         """
         Get asset ID from the assets table.
         
         Args:
             symbol: Asset symbol
             protocol: Protocol name
+            chain: Blockchain name (default: 'ethereum')
             
         Returns:
             Asset ID or None if not found
@@ -155,8 +156,8 @@ class DefiLlamaBackfiller:
             cur = conn.cursor()
             
             cur.execute(
-                "SELECT id FROM assets WHERE symbol = %s AND protocol = %s",
-                (symbol, protocol)
+                "SELECT id FROM assets WHERE symbol = %s AND protocol = %s AND chain = %s",
+                (symbol, protocol, chain)
             )
             result = cur.fetchone()
             

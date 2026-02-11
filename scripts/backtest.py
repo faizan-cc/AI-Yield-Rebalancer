@@ -38,6 +38,7 @@ class SimpleBacktest:
                 ym.time,
                 a.protocol,
                 a.symbol,
+                a.chain,
                 ym.asset_id,
                 ym.apy_percent,
                 ym.tvl_usd
@@ -65,7 +66,7 @@ class SimpleBacktest:
         
         # Equal weight
         weight = 1.0 / len(top_assets)
-        allocations = {row['symbol']: weight for _, row in top_assets.iterrows()}
+        allocations = {row['asset_key']: weight for _, row in top_assets.iterrows()}
         
         return allocations
     
@@ -83,14 +84,25 @@ class SimpleBacktest:
         if len(filtered) == 0:
             return {}
         
-        # Weight by TVL
-        total_tvl = filtered['tvl_usd'].sum()
-        if total_tvl == 0:
-            return {}
+        # Weight by TVL (ensure TVL values are valid)
+        valid_tvl = filtered[filtered['tvl_usd'].notna() & (filtered['tvl_usd'] > 0)]
+        
+        if len(valid_tvl) == 0:
+            # Fallback to equal weights if no valid TVL
+            weight = 1.0 / len(filtered)
+            allocations = {row['asset_key']: weight for _, row in filtered.iterrows()}
+            return allocations
+        
+        total_tvl = valid_tvl['tvl_usd'].sum()
+        if total_tvl == 0 or not np.isfinite(total_tvl):
+            # Fallback to equal weights
+            weight = 1.0 / len(valid_tvl)
+            allocations = {row['asset_key']: weight for _, row in valid_tvl.iterrows()}
+            return allocations
         
         allocations = {
-            row['symbol']: row['tvl_usd'] / total_tvl 
-            for _, row in filtered.iterrows()
+            row['asset_key']: row['tvl_usd'] / total_tvl 
+            for _, row in valid_tvl.iterrows()
         }
         
         return allocations
@@ -156,6 +168,7 @@ class SimpleBacktest:
             current_apy = row['apy_percent']
             tvl = row['tvl_usd']
             protocol = row['protocol']
+            chain = row['chain']
             
             # === LSTM: Predict future yield ===
             asset_df = historical_df[historical_df['asset_id'] == asset_id].copy()
@@ -206,6 +219,9 @@ class SimpleBacktest:
             
             asset_scores.append({
                 'symbol': symbol,
+                'protocol': protocol,
+                'chain': chain,
+                'asset_key': f"{symbol}/{protocol}/{chain}",
                 'predicted_yield': predicted_yield,
                 'current_apy': current_apy,
                 'risk_score': risk_score,
@@ -225,7 +241,7 @@ class SimpleBacktest:
         
         # Apply position persistence: boost scores for current holdings
         for asset in acceptable_assets:
-            if asset['symbol'] in current_positions:
+            if asset['asset_key'] in current_positions:
                 # Boost predicted yield by persistence factor to favor keeping positions
                 asset['predicted_yield'] = asset['predicted_yield'] * (1 + position_persistence)
         
@@ -241,13 +257,13 @@ class SimpleBacktest:
             
             if total_weight > 0:
                 allocations = {
-                    top_assets[i]['symbol']: weighted_yields[i] / total_weight
+                    top_assets[i]['asset_key']: weighted_yields[i] / total_weight
                     for i in range(len(top_assets))
                 }
             else:
                 # Fallback to equal weights
                 weight = 1.0 / len(top_assets)
-                allocations = {a['symbol']: weight for a in top_assets}
+                allocations = {a['asset_key']: weight for a in top_assets}
             
             logger.debug(f"Allocations: {allocations}")
             
@@ -264,7 +280,7 @@ class SimpleBacktest:
                     return current_positions
             
             # Store positions for next iteration
-            self._last_ml_positions = {symbol: weight for symbol, weight in allocations.items()}
+            self._last_ml_positions = {asset_key: weight for asset_key, weight in allocations.items()}
             return allocations
         
         logger.debug("No acceptable assets found, no allocation")
@@ -275,33 +291,20 @@ class SimpleBacktest:
         """Stablecoin Maximum Profit Strategy: Zero risk, maximum stable returns
         
         Only invests in HIGH-YIELD stablecoin pools:
-        - USDC, USDT, DAI (lending on Aave - consistently >2%)
-        - USDC/USDT (Uniswap V3 LP - low risk, decent yield)
+        - USDC, USDT, DAI (lending on Aave/Morpho - consistently >2%)
+        - USDC/USDT, DAI/USDC (DEX LP - low risk, decent yield)
         
         Strategy:
         1. Filter to only stablecoin assets with proven performance
         2. Require minimum APY of 2.0% (avoid dead capital)
-        3. Select top 3 by current APY
+        3. Select top 3 asset_ids by current APY (allows multiple protocols)
         4. Equal weight for stability (avoid over-concentration)
+        
+        Note: Uses asset_id as key to support same symbol on different protocols
         """
         
         # Get data for current date
-        current_ts = pd.Timestamp(date).tz_localize(None)
-        df_copy = df.copy()
-        df_copy['time_naive'] = pd.to_datetime(df_copy['time']).dt.tz_localize(None)
-        historical_df = df_copy[df_copy['time_naive'] <= current_ts]
-        
-        if len(historical_df) == 0:
-            return {}
-        
-        # Get most recent data
-        day_data = historical_df[historical_df['time_naive'].dt.date == date.date()]
-        
-        if len(day_data) == 0:
-            recent_dates = historical_df[historical_df['time_naive'] <= current_ts]['time_naive'].dt.date.unique()
-            if len(recent_dates) > 0:
-                most_recent_date = max(recent_dates)
-                day_data = historical_df[historical_df['time_naive'].dt.date == most_recent_date]
+        day_data = df[df['time'].dt.date == date.date()]
         
         if len(day_data) == 0:
             return {}
@@ -309,28 +312,36 @@ class SimpleBacktest:
         # Define HIGH-QUALITY stablecoin pools only
         # Based on analysis: USDC, USDT, DAI on Aave are 100% above 1.84%
         # USDC/USDT on Uniswap is 72% above 1.84%
-        high_quality_stables = ['USDC', 'USDT', 'DAI', 'USDC/USDT']
+        high_quality_stables = ['USDC', 'USDT', 'DAI', 'USDC/USDT', 'DAI/USDC']
         
         # Filter to only high-quality stablecoins
         stable_data = day_data[day_data['symbol'].isin(high_quality_stables)].copy()
+        
+        if len(stable_data) == 0:
+            logger.debug(f"No stablecoin data found for {date.date()}")
+            return {}
         
         # Filter by minimum APY (higher threshold for quality)
         candidates = stable_data[stable_data['apy_percent'] >= min_apy]
         
         if len(candidates) == 0:
             # Fallback to lower threshold if no high-yield stables available
-            candidates = stable_data[stable_data['apy_percent'] >= 1.5]
+            candidates = stable_data[stable_data['apy_percent'] >= 1.0]
+            logger.debug(f"Using lower APY threshold (1.0%) for stablecoins on {date.date()}")
         
         if len(candidates) == 0:
+            logger.debug(f"No viable stablecoin candidates for {date.date()}")
             return {}
         
-        # Sort by APY and select top N
-        top_stables = candidates.nlargest(top_n, 'apy_percent')
+        # Sort by APY and select top N (use asset_id to allow multiple USDC/DAI/USDT across protocols)
+        top_stables = candidates.nlargest(min(top_n, len(candidates)), 'apy_percent')
         
         # Equal weight allocation for stability and consistency
+        # Use asset_key to uniquely identify each pool (symbol/protocol)
         if len(top_stables) > 0:
             weight = 1.0 / len(top_stables)
-            allocations = {row['symbol']: weight for _, row in top_stables.iterrows()}
+            allocations = {row['asset_key']: weight for _, row in top_stables.iterrows()}
+            logger.debug(f"Stablecoin allocations for {date.date()}: {allocations}")
             return allocations
         
         return {}
@@ -376,6 +387,7 @@ class SimpleBacktest:
             
             risk_scores.append({
                 'symbol': row['symbol'],
+                'asset_key': row['asset_key'],
                 'apy': row['apy_percent'],
                 'tvl': row['tvl_usd'],
                 'risk': risk_label,
@@ -395,7 +407,7 @@ class SimpleBacktest:
         # Equal weight allocation
         if len(safe_assets) > 0:
             weight = 1.0 / len(safe_assets)
-            allocations = {a['symbol']: weight for a in safe_assets}
+            allocations = {a['asset_key']: weight for a in safe_assets}
             return allocations
         
         return {}
@@ -415,6 +427,10 @@ class SimpleBacktest:
         if hasattr(self, '_last_ml_positions'):
             delattr(self, '_last_ml_positions')
         
+        # Add composite key for unique asset identification (symbol/protocol/chain)
+        df = df.copy()
+        df['asset_key'] = df['symbol'] + '/' + df['protocol'] + '/' + df['chain']
+        
         # Get unique dates
         dates = pd.to_datetime(df['time']).dt.date.unique()
         dates = sorted(dates)
@@ -428,13 +444,33 @@ class SimpleBacktest:
         
         # Portfolio state
         capital = self.initial_capital
-        positions = {}  # {symbol: {amount, entry_date, entry_apy}}
+        positions = {}  # {asset_key: amount}
         portfolio_values = []
+        last_date = None
         
         logger.info(f"Simulating from {dates[0]} to {dates[-1]}")
         logger.info(f"Rebalancing every {rebalance_frequency}")
         
         for current_date in pd.to_datetime(dates):
+            # Apply daily yields to existing positions using CURRENT APY
+            if last_date is not None and positions:
+                days_elapsed = (current_date - last_date).days
+                if days_elapsed > 0:
+                    for asset_key in list(positions.keys()):
+                        # Get current APY for this asset
+                        current_data = df[
+                            (df['time'].dt.date == current_date.date()) & 
+                            (df['asset_key'] == asset_key)
+                        ]
+                        
+                        if len(current_data) > 0:
+                            current_apy = current_data.iloc[0]['apy_percent']
+                            # Apply daily compounding using CURRENT APY
+                            daily_rate = (1 + current_apy / 100) ** (1 / 365) - 1
+                            growth = (1 + daily_rate) ** days_elapsed
+                            positions[asset_key] = positions[asset_key] * growth
+                        # If no data available, position value stays the same
+            
             # Check if rebalancing day
             if current_date in rebalance_dates:
                 # Get allocations from strategy
@@ -442,23 +478,7 @@ class SimpleBacktest:
                 
                 if allocations:
                     # Calculate total value
-                    total_value = capital
-                    for symbol, pos in positions.items():
-                        # Get current APY for this asset
-                        current_data = df[
-                            (df['time'].dt.date == current_date.date()) & 
-                            (df['symbol'] == symbol)
-                        ]
-                        
-                        if len(current_data) > 0:
-                            # Value increased by APY (daily)
-                            days_held = (current_date - pos['entry_date']).days
-                            if days_held > 0:
-                                daily_return = pos['entry_apy'] / 365 / 100
-                                growth = (1 + daily_return) ** days_held
-                                total_value += pos['amount'] * growth
-                            else:
-                                total_value += pos['amount']
+                    total_value = capital + sum(positions.values())
                     
                     # Calculate turnover for smart transaction costs
                     if smart_rebalancing and positions:
@@ -474,50 +494,25 @@ class SimpleBacktest:
                         # Apply full transaction costs
                         total_value *= (1 - self.transaction_cost)
                     
-                    # Rebalance
+                    # Rebalance: allocate to new positions
                     new_positions = {}
-                    for symbol, weight in allocations.items():
+                    for asset_key, weight in allocations.items():
                         amount = total_value * weight
-                        
-                        # Get entry APY
-                        asset_data = df[
-                            (df['time'].dt.date == current_date.date()) & 
-                            (df['symbol'] == symbol)
-                        ]
-                        
-                        if len(asset_data) > 0:
-                            entry_apy = asset_data.iloc[0]['apy_percent']
-                            new_positions[symbol] = {
-                                'amount': amount,
-                                'entry_date': current_date,
-                                'entry_apy': entry_apy
-                            }
+                        new_positions[asset_key] = amount
                     
                     positions = new_positions
                     capital = 0  # All capital is invested
             
             # Calculate current portfolio value
-            total_value = capital
-            for symbol, pos in positions.items():
-                current_data = df[
-                    (df['time'].dt.date == current_date.date()) & 
-                    (df['symbol'] == symbol)
-                ]
-                
-                if len(current_data) > 0:
-                    days_held = (current_date - pos['entry_date']).days
-                    if days_held > 0:
-                        daily_return = pos['entry_apy'] / 365 / 100
-                        growth = (1 + daily_return) ** days_held
-                        total_value += pos['amount'] * growth
-                    else:
-                        total_value += pos['amount']
+            total_value = capital + sum(positions.values())
             
             portfolio_values.append({
                 'date': current_date,
                 'value': total_value,
                 'positions': len(positions)
             })
+            
+            last_date = current_date
         
         return pd.DataFrame(portfolio_values)
     

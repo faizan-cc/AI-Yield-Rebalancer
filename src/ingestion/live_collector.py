@@ -24,22 +24,42 @@ class LiveCollector:
     # Mapping of our asset symbols to DefiLlama pool IDs
     # These were found using the backfill_client.py find_pool_id() method
     POOL_MAPPINGS = {
+        # ===== ETHEREUM MAINNET =====
         # Aave V3
-        ('USDC', 'aave_v3'): 'aa70268e-4b52-42bf-a116-608b370f9501',
-        ('USDT', 'aave_v3'): 'f981a304-bb6c-45b8-b0c5-fd2f515ad23a',
-        ('DAI', 'aave_v3'): '3665ee7e-6c5d-49d9-abb7-c47ab5d9d4ac',
-        ('WETH', 'aave_v3'): 'e880e828-ca59-4ec6-8d4f-27182a4dc23d',
-        ('WBTC', 'aave_v3'): '7e382157-b1bc-406d-b17b-facba43b716e',
+        ('USDC', 'aave_v3', 'ethereum'): 'aa70268e-4b52-42bf-a116-608b370f9501',
+        ('USDT', 'aave_v3', 'ethereum'): 'f981a304-bb6c-45b8-b0c5-fd2f515ad23a',
+        ('DAI', 'aave_v3', 'ethereum'): '3665ee7e-6c5d-49d9-abb7-c47ab5d9d4ac',
+        ('WETH', 'aave_v3', 'ethereum'): 'e880e828-ca59-4ec6-8d4f-27182a4dc23d',
+        ('WBTC', 'aave_v3', 'ethereum'): '7e382157-b1bc-406d-b17b-facba43b716e',
         
         # Curve
-        ('stETH', 'curve'): '57d30b9c-fc66-4ac2-b666-69ad5f410cce',
-        ('FRAX', 'curve'): '12ca9565-0369-404e-b209-631305e4012a',
+        ('stETH', 'curve', 'ethereum'): '57d30b9c-fc66-4ac2-b666-69ad5f410cce',
+        ('FRAX', 'curve', 'ethereum'): '12ca9565-0369-404e-b209-631305e4012a',
         
         # Uniswap V3 (top pools by TVL)
-        ('USDC/WETH', 'uniswap_v3'): '665dc8bc-c79d-4800-97f7-304bf368e547',
-        ('WBTC/WETH', 'uniswap_v3'): 'c5599b3a-ea73-4017-a867-72eb971301d1',
-        ('USDC/USDT', 'uniswap_v3'): 'e737d721-f45c-40f0-9793-9f56261862b9',
-        ('DAI/USDC', 'uniswap_v3'): 'a86ee795-54d9-4812-9148-b312967cefe5',
+        ('USDC/WETH', 'uniswap_v3', 'ethereum'): '665dc8bc-c79d-4800-97f7-304bf368e547',
+        ('WBTC/WETH', 'uniswap_v3', 'ethereum'): 'c5599b3a-ea73-4017-a867-72eb971301d1',
+        ('USDC/USDT', 'uniswap_v3', 'ethereum'): 'e737d721-f45c-40f0-9793-9f56261862b9',
+        ('DAI/USDC', 'uniswap_v3', 'ethereum'): 'a86ee795-54d9-4812-9148-b312967cefe5',
+        
+        # ===== BASE CHAIN (Lower Fees) =====
+        # Aave V3 on Base
+        ('USDC', 'aave_v3', 'base'): '7e0661bf-8cf3-45e6-9424-31916d4c7b84',
+        ('cbBTC', 'aave_v3', 'base'): '89bc7c4c-d71c-435c-ab28-56c803d51320',
+        ('WETH', 'aave_v3', 'base'): 'f0131970-afac-4835-b22c-520f192e01d5',
+        
+        # Morpho on Base (high TVL stablecoin lending)
+        ('USDC', 'morpho', 'base'): '7820bd3c-461a-4811-9f0b-1d39c1503c3f',
+        ('cbBTC', 'morpho', 'base'): '7d33d57d-36dc-414b-9538-22a223250468',
+        
+        # Uniswap V3 on Base
+        ('WETH/USDC', 'uniswap_v3', 'base'): 'b99bcdf5-1350-4269-981e-0e9b5cccb007',
+        ('WETH/cbBTC', 'uniswap_v3', 'base'): 'ae6e650d-2da1-43ee-b960-2adfdf4dc2b7',
+        ('USDC/cbBTC', 'uniswap_v3', 'base'): '9c3c95ef-5e04-4c75-b7ec-6a59a9ea904b',
+        
+        # Aerodrome (Base-native DEX)
+        ('USDC/AERO', 'aerodrome', 'base'): 'd32f9c01-47d1-4077-8c73-8b91b08d1e91',
+        ('WETH/USDC', 'aerodrome', 'base'): 'e8cb4dbb-9e66-4cfa-9c77-407118b128a0',
     }
     
     def __init__(self):
@@ -105,17 +125,29 @@ class LiveCollector:
             print(f"  ✗ Exception: {str(e)}")
             return None
     
-    def get_asset_id(self, symbol: str, protocol: str) -> Optional[int]:
-        """Get asset ID from database."""
+    def get_asset_id(self, symbol: str, protocol: str, chain: str = 'ethereum') -> Optional[int]:
+        """Get asset ID from database, creating if doesn't exist."""
         try:
             conn = psycopg2.connect(**self.db_config)
             cur = conn.cursor()
             
+            # Try to find existing asset
             cur.execute(
-                "SELECT id FROM assets WHERE symbol = %s AND protocol = %s",
-                (symbol, protocol)
+                "SELECT id FROM assets WHERE symbol = %s AND protocol = %s AND chain = %s",
+                (symbol, protocol, chain)
             )
             result = cur.fetchone()
+            
+            # If not found, create it
+            if not result:
+                cur.execute(
+                    """INSERT INTO assets (symbol, protocol, chain, address, decimals) 
+                       VALUES (%s, %s, %s, %s, %s) RETURNING id""",
+                    (symbol, protocol, chain, '0x0000000000000000000000000000000000000000', 18)
+                )
+                result = cur.fetchone()
+                conn.commit()
+                print(f"✓ Created new asset: {symbol} on {chain}")
             
             cur.close()
             conn.close()
@@ -176,11 +208,11 @@ class LiveCollector:
         current_time = datetime.utcnow()
         records = []
         
-        for (symbol, protocol), pool_id in self.POOL_MAPPINGS.items():
-            print(f"\n  {protocol:10s} | {symbol:6s}...", end=" ")
+        for (symbol, protocol, chain), pool_id in self.POOL_MAPPINGS.items():
+            print(f"\n  [{chain:8s}] {protocol:10s} | {symbol:6s}...", end=" ")
             
-            # Get asset ID
-            asset_id = self.get_asset_id(symbol, protocol)
+            # Get asset ID - now includes chain
+            asset_id = self.get_asset_id(symbol, protocol, chain)
             if not asset_id:
                 print("✗ Not in database")
                 continue
