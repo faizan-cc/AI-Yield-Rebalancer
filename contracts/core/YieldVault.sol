@@ -3,9 +3,9 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/security/Pausable.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol";
 
 /**
  * @title YieldVault
@@ -54,8 +54,8 @@ contract YieldVault is ReentrancyGuard, Ownable, Pausable {
     /// @notice Last rebalance timestamp
     uint256 public lastRebalanceTime;
     
-    /// @notice Rebalance frequency (7 days)
-    uint256 public constant REBALANCE_FREQUENCY = 7 days;
+    /// @notice Rebalance frequency (5 minutes for testnet testing)
+    uint256 public constant REBALANCE_FREQUENCY = 5 minutes;
 
     /// @notice Asset allocations: asset address => amount
     mapping(address => uint256) public allocations;
@@ -96,10 +96,11 @@ contract YieldVault is ReentrancyGuard, Ownable, Pausable {
     // ============ Constructor ============
 
     constructor(
+        address initialOwner,
         address _strategyManager,
         address _rebalanceExecutor,
         address _treasury
-    ) {
+    ) Ownable(initialOwner) {
         require(_strategyManager != address(0), "Invalid strategy manager");
         require(_rebalanceExecutor != address(0), "Invalid rebalance executor");
         require(_treasury != address(0), "Invalid treasury");

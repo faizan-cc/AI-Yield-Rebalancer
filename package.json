@@ -26,6 +26,16 @@
     "npm": ">=9.0.0"
   },
   "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "deploy:sepolia": "hardhat run scripts/deploy.js --network sepolia",
+    "deploy:base-sepolia": "hardhat run scripts/deploy.js --network base_sepolia",
+    "verify:sepolia": "hardhat run scripts/verify.js --network sepolia",
+    "verify:base-sepolia": "hardhat run scripts/verify.js --network base_sepolia",
+    "initialize:sepolia": "hardhat run scripts/initialize.js --network sepolia",
+    "initialize:base-sepolia": "hardhat run scripts/initialize.js --network base_sepolia",
+    "node": "hardhat node",
+    "clean": "hardhat clean",
     "contracts:build": "cd contracts && forge build",
     "contracts:test": "cd contracts && forge test -vvv",
     "contracts:coverage": "cd contracts && forge coverage",
@@ -41,6 +51,10 @@
     "docs:serve": "mkdocs serve"
   },
   "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "@nomicfoundation/hardhat-verify": "^2.0.0",
+    "hardhat": "^2.19.0",
+    "hardhat-gas-reporter": "^1.0.9",
     "@graphprotocol/graph-cli": "^0.64.0",
     "@graphprotocol/graph-ts": "^0.31.0",
     "prettier": "^3.1.1",
@@ -48,7 +62,10 @@
     "husky": "^8.0.3",
     "lint-staged": "^15.2.0"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.0.1",
+    "dotenv": "^16.3.1"
+  },
   "husky": {
     "hooks": {
       "pre-commit": "lint-staged"

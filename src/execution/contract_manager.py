@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 class ContractManager:
     """Manages smart contract interactions for the DeFi yield system"""
     
-    def __init__(self, network: str = "sepolia"):
+    def __init__(self, network: str = "base_sepolia"):
         """
         Initialize contract manager
         
@@ -75,30 +75,74 @@ class ContractManager:
         
     def _load_contracts(self):
         """Load deployed contract addresses and ABIs"""
-        deployments_file = f"deployments/{self.network}.json"
+        # Try sepolia_deployment.json format first
+        deployments_file = f"deployments/{self.network}_deployment.json"
         
+        if not os.path.exists(deployments_file):
+            # Try legacy format
+            deployments_file = f"deployments/{self.network}.json"
+            
         if not os.path.exists(deployments_file):
             logger.warning(f"No deployments found for {self.network}")
             return
             
         with open(deployments_file, 'r') as f:
-            deployments = json.load(f)
+            deployment_data = json.load(f)
+        
+        # Handle new format (sepolia_deployment.json)
+        if 'contracts' in deployment_data:
+            contract_addresses = deployment_data['contracts']
             
-        # Load each contract
-        for name, deployment in deployments.items():
-            address = deployment.get("address")
-            abi_file = deployment.get("abi")
+            # Load ABIs for each contract
+            for name, address in contract_addresses.items():
+                abi = self._load_contract_abi(name)
+                if abi:
+                    contract = self.w3.eth.contract(
+                        address=self.w3.to_checksum_address(address),
+                        abi=abi
+                    )
+                    self.contracts[name] = contract
+                    logger.info(f"✓ Loaded {name}: {address[:10]}...")
+        else:
+            # Handle legacy format
+            for name, deployment in deployment_data.items():
+                address = deployment.get("address")
+                abi_file = deployment.get("abi")
+                
+                if address and abi_file:
+                    with open(abi_file, 'r') as f:
+                        abi = json.load(f)
+                        
+                    contract = self.w3.eth.contract(
+                        address=self.w3.to_checksum_address(address),
+                        abi=abi
+                    )
+                    self.contracts[name] = contract
+                    logger.info(f"✓ Loaded {name}: {address[:10]}...")
+    
+    def _load_contract_abi(self, contract_name: str):
+        """Load contract ABI from artifacts"""
+        # Map contract names to artifact paths
+        artifact_paths = {
+            'YieldVault': 'artifacts/contracts/core/YieldVault.sol/YieldVault.json',
+            'StrategyManager': 'artifacts/contracts/strategies/StrategyManager.sol/StrategyManager.json',
+            'RebalanceExecutor': 'artifacts/contracts/core/RebalanceExecutor.sol/RebalanceExecutor.json',
+            'AaveAdapter': 'artifacts/contracts/adapters/AaveAdapter.sol/AaveAdapter.json',
+            'UniswapAdapter': 'artifacts/contracts/adapters/UniswapAdapter.sol/UniswapAdapter.json'
+        }
+        
+        artifact_path = artifact_paths.get(contract_name)
+        if not artifact_path:
+            logger.warning(f"Unknown contract: {contract_name}")
+            return None
             
-            if address and abi_file:
-                with open(abi_file, 'r') as f:
-                    abi = json.load(f)
-                    
-                contract = self.w3.eth.contract(
-                    address=self.w3.to_checksum_address(address),
-                    abi=abi
-                )
-                self.contracts[name] = contract
-                logger.info(f"✓ Loaded {name}: {address}")
+        if not os.path.exists(artifact_path):
+            logger.warning(f"ABI file not found: {artifact_path}")
+            return None
+            
+        with open(artifact_path, 'r') as f:
+            artifact = json.load(f)
+        return artifact['abi']
                 
     def deploy_contract(
         self,

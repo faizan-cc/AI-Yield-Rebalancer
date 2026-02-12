@@ -1,0 +1,17 @@
+{
+  "network": "sepolia",
+  "timestamp": "2026-02-11T11:39:26.508Z",
+  "deployer": "0x370e3E98173D667939479373B915BBAB3Eaa029F",
+  "contracts": {
+    "YieldVault": "0x0dB70049972d2604cB660713b8b16c6C1ed10Aa1",
+    "StrategyManager": "0xC043098B38Dc34d1fc85b2821a828772a7161104",
+    "RebalanceExecutor": "0x2B22843a7eb59b8F431aE25f72704297dE4505d8",
+    "AaveAdapter": "0x81030FE2b40bBfC3169257b4bA5C1AFF442da3AE",
+    "UniswapAdapter": "0x07E3D5C5CcDd6F4a7840f1994bA09CD00e9A16C8"
+  },
+  "externalAddresses": {
+    "aavePool": "0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951",
+    "swapRouter": "0xE592427A0AEce92De3Edee1F18E0157C05861564",
+    "quoter": "0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6"
+  }
+}

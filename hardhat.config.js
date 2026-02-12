@@ -9,7 +9,8 @@ module.exports = {
       optimizer: {
         enabled: true,
         runs: 200
-      }
+      },
+      viaIR: true  // Enable IR-based code generation to avoid stack too deep
     }
   },
   networks: {
@@ -35,10 +36,7 @@ module.exports = {
     }
   },
   etherscan: {
-    apiKey: {
-      sepolia: process.env.ETHERSCAN_API_KEY || "",
-      base: process.env.BASESCAN_API_KEY || ""
-    }
+    apiKey: process.env.ETHERSCAN_API_KEY || ""
   },
   gasReporter: {
     enabled: true,
